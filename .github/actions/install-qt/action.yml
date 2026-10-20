@@ -1,5 +1,5 @@
 name: Install Qt
-description: Install Qt for Linux (GCC) or Windows (MinGW) and output the Qt prefix.
+description: Install Qt for Linux (GCC) or Windows (MinGW) and expose the resolved Qt installation path.
 
 inputs:
   target:
@@ -12,8 +12,8 @@ inputs:
 
 outputs:
   qt-path:
-    description: "Qt installation prefix"
-    value: ${{ steps.qt-linux.outputs.qtPath || steps.qt-windows.outputs.qtPath }}
+    description: "Resolved Qt installation prefix"
+    value: ${{ steps.resolve-linux.outputs.qtPath || steps.resolve-windows.outputs.qtPath }}
 
 runs:
   using: composite
@@ -31,9 +31,30 @@ runs:
         cache: true
         cache-key-prefix: qt-linux
 
-    # --------------------------------------------------
-    # Windows: install Qt with MinGW
-    # --------------------------------------------------
+    - name: Resolve Qt path (Linux)
+      id: resolve-linux
+      if: inputs.target == 'linux'
+      shell: bash
+      env:
+        ACTION_QT_PATH: ${{ steps.qt-linux.outputs.qtPath }}
+      run: |
+        set -euo pipefail
+
+        qt="${ACTION_QT_PATH:-${QT_ROOT_DIR:-}}"
+
+        if [[ -z "$qt" ]]; then
+          echo "::error::Qt path is empty. Neither qtPath output nor QT_ROOT_DIR is set."
+          exit 1
+        fi
+
+        if [[ ! -d "$qt" ]]; then
+          echo "::error::Qt installation directory not found: $qt"
+          exit 1
+        fi
+
+        echo "Resolved Qt path: $qt"
+        echo "qtPath=$qt" >> "$GITHUB_OUTPUT"
+
     - name: Install Qt (Windows, MinGW)
       id: qt-windows
       if: inputs.target == 'windows'
@@ -45,44 +66,57 @@ runs:
         cache: true
         cache-key-prefix: qt-windows
 
-    # --------------------------------------------------
-    # Windows: locate MinGW and add it to PATH
-    # --------------------------------------------------
+    - name: Resolve Qt path (Windows)
+      id: resolve-windows
+      if: inputs.target == 'windows'
+      shell: pwsh
+      env:
+        ACTION_QT_PATH: ${{ steps.qt-windows.outputs.qtPath }}
+      run: |
+        $qt = $env:ACTION_QT_PATH
+
+        if ([string]::IsNullOrWhiteSpace($qt)) {
+          $qt = $env:QT_ROOT_DIR
+        }
+
+        if ([string]::IsNullOrWhiteSpace($qt)) {
+          throw "Qt path is empty. Neither qtPath output nor QT_ROOT_DIR is set."
+        }
+
+        if (-not (Test-Path -LiteralPath $qt -PathType Container)) {
+          throw "Qt installation directory not found: $qt"
+        }
+
+        "qtPath=$qt" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        Write-Host "Resolved Qt path: $qt"
+
     - name: Put MinGW on PATH (Windows)
       if: inputs.target == 'windows'
       shell: pwsh
       env:
-        QT_PATH: ${{ steps.qt-windows.outputs.qtPath }}
-        QT_ROOT_DIR: ${{ env.QT_ROOT_DIR }}
-        IQTA_TOOLS: ${{ env.IQTA_TOOLS }}
+        QT_PATH: ${{ steps.resolve-windows.outputs.qtPath }}
       run: |
-        $ErrorActionPreference = 'Stop'
+        $qt = $env:QT_PATH
 
-        # Resolve the Qt installation prefix.
-        $qtPath = $env:QT_PATH
-
-        if ([string]::IsNullOrWhiteSpace($qtPath)) {
-          $qtPath = $env:QT_ROOT_DIR
+        if ([string]::IsNullOrWhiteSpace($qt)) {
+          throw "Qt path is empty; cannot configure MinGW."
         }
 
-        if ([string]::IsNullOrWhiteSpace($qtPath)) {
-          throw "Qt path is empty. Check install-qt-action outputs."
-        }
+        $qtVersionDir = Split-Path -Parent $qt
+        $qtInstallRoot = Split-Path -Parent $qtVersionDir
 
         $toolsRoot = $env:IQTA_TOOLS
-
         if ([string]::IsNullOrWhiteSpace($toolsRoot)) {
-          $toolsRoot = Join-Path (Split-Path -Parent (Split-Path -Parent $qtPath)) 'Tools'
+          $toolsRoot = Join-Path $qtInstallRoot 'Tools'
         }
 
         $mingw = Join-Path $toolsRoot 'mingw1310_64\bin'
+        $compiler = Join-Path $mingw 'g++.exe'
 
-        if (-not (Test-Path (Join-Path $mingw 'g++.exe'))) {
-          throw "MinGW compiler not found: $mingw"
+        if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
+          throw "MinGW compiler not found at '$compiler'. IQTA_TOOLS='$env:IQTA_TOOLS'"
         }
 
-        # Add MinGW to PATH for subsequent GitHub Actions steps.
         $mingw | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-
-        Write-Host "Qt path: $qtPath"
         Write-Host "MinGW added to PATH: $mingw"
+        & $compiler --version

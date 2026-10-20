@@ -1,9 +1,9 @@
 name: Build Qt MQTT (pinned)
-description: Build the pinned Qt MQTT into deps/install, with caching.
+description: Build the pinned Qt MQTT version from deps/qtmqtt.env into deps/install, with caching.
 
 inputs:
   qt-path:
-    description: "Qt prefix from the install-qt action"
+    description: "Qt installation prefix from the install-qt action"
     required: true
   qt-version:
     description: "Qt version, used in the cache key"
@@ -17,14 +17,18 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+
         if [[ ! -f deps/qtmqtt.env ]]; then
-          echo "::error::deps/qtmqtt.env not found."
+          echo "::error::deps/qtmqtt.env was not found."
           exit 1
         fi
+
         # shellcheck source=/dev/null
         . deps/qtmqtt.env
-        : "${QTMQTT_REPO:?QTMQTT_REPO is missing}"
-        : "${QTMQTT_TAG:?QTMQTT_TAG is missing}"
+
+        : "${QTMQTT_REPO:?QTMQTT_REPO is not set in deps/qtmqtt.env}"
+        : "${QTMQTT_TAG:?QTMQTT_TAG is not set in deps/qtmqtt.env}"
+
         echo "repo=$QTMQTT_REPO" >> "$GITHUB_OUTPUT"
         echo "tag=$QTMQTT_TAG" >> "$GITHUB_OUTPUT"
 
@@ -47,10 +51,12 @@ runs:
       run: |
         set -euo pipefail
 
-        qt="${QT_PATH:-}"
+        # Prefer the explicit action input; fall back to the Qt install action's
+        # environment variable if the caller did not provide an output.
+        qt="${QT_PATH:-${QT_ROOT_DIR:-}}"
 
         if [[ -z "$qt" ]]; then
-          echo "::error::Qt path is empty. Pass the install action's qt-path output."
+          echo "::error::Qt path is empty. Neither qt-path input nor QT_ROOT_DIR is set."
           exit 1
         fi
 
@@ -73,6 +79,14 @@ runs:
           echo "::error::Qt installation directory not found: $qt"
           exit 1
         fi
+
+        if [[ -z "${QTMQTT_REPO_URL:-}" || -z "${QTMQTT_TAG_NAME:-}" ]]; then
+          echo "::error::Qt MQTT repository URL or tag is empty."
+          exit 1
+        fi
+
+        echo "Using Qt path: $qt"
+        echo "Building Qt MQTT tag: $QTMQTT_TAG_NAME"
 
         mkdir -p deps/build
         rm -rf deps/qtmqtt deps/build/qtmqtt
@@ -101,12 +115,14 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+
         config="deps/install/lib/cmake/Qt6Mqtt/Qt6MqttConfig.cmake"
 
         if [[ ! -f "$config" ]]; then
-          echo "::error::Qt MQTT config not found: $config"
+          echo "::error::Qt MQTT config not found at $config"
           exit 1
         fi
+
         echo "Qt MQTT ready: $config"
 
     - name: Copy Qt MQTT DLL next to Qt (Windows)
@@ -117,7 +133,7 @@ runs:
       run: |
         set -euo pipefail
 
-        qt="${QT_PATH:-}"
+        qt="${QT_PATH:-${QT_ROOT_DIR:-}}"
 
         if [[ -z "$qt" ]]; then
           echo "::error::Qt path is empty; cannot copy Qt MQTT DLL."
@@ -132,14 +148,12 @@ runs:
         fi
 
         shopt -s nullglob
-        dlls=(deps/install/bin/Qt6Mqtt*.dll)
+        mqtt_dlls=(deps/install/bin/Qt6Mqtt*.dll)
 
-        if (( ${#dlls[@]} == 0 )); then
-          echo "::error::No Qt6Mqtt DLL found in deps/install/bin."
+        if (( ${#mqtt_dlls[@]} == 0 )); then
+          echo "::error::No Qt MQTT DLL found in deps/install/bin"
           exit 1
         fi
 
-        cp -f "${dlls[@]}" "$qt_bin/"
-
-        echo "Qt MQTT DLLs copied to $qt_bin"
+        cp -f "${mqtt_dlls[@]}" "$qt_bin/"
         ls -l "$qt_bin"/Qt6Mqtt*.dll
