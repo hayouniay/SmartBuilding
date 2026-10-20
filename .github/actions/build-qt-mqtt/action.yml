@@ -1,0 +1,81 @@
+# Builds the Qt MQTT version pinned in deps/qtmqtt.env into deps/install.
+# The build is cached, so later jobs with the same pin and Qt version reuse it.
+name: Build Qt MQTT (pinned)
+description: Build the pinned Qt MQTT (deps/qtmqtt.env) into deps/install, with caching.
+
+inputs:
+  qt-path:
+    description: "Qt prefix from the install-qt action"
+    required: true
+  qt-version:
+    description: "Qt version, used in the cache key"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Read pinned Qt MQTT
+      id: pin
+      shell: bash
+      run: |
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        . deps/qtmqtt.env
+        echo "repo=$QTMQTT_REPO" >> "$GITHUB_OUTPUT"
+        echo "tag=$QTMQTT_TAG" >> "$GITHUB_OUTPUT"
+
+    - name: Restore Qt MQTT cache
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: deps/install
+        key: qtmqtt-${{ runner.os }}-${{ inputs.qt-version }}-${{ steps.pin.outputs.tag }}-${{ hashFiles('deps/qtmqtt.env') }}
+
+    - name: Build Qt MQTT (pinned)
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        QT_PATH: ${{ inputs.qt-path }}
+        QTMQTT_REPO_URL: ${{ steps.pin.outputs.repo }}
+        QTMQTT_TAG_NAME: ${{ steps.pin.outputs.tag }}
+        CC_NAME: ${{ runner.os == 'Linux' && 'gcc-14' || 'gcc' }}
+        CXX_NAME: ${{ runner.os == 'Linux' && 'g++-14' || 'g++' }}
+      run: |
+        set -euo pipefail
+        qt="$QT_PATH"
+        install_dir="$PWD/deps/install"
+        # On Windows, give CMake native paths (C:/...) instead of Git Bash paths (/d/...).
+        if command -v cygpath >/dev/null 2>&1; then
+          qt="$(cygpath -m "$qt")"
+          install_dir="$(cygpath -m "$install_dir")"
+        fi
+        git clone --depth 1 --branch "$QTMQTT_TAG_NAME" "$QTMQTT_REPO_URL" deps/qtmqtt
+        cmake -S deps/qtmqtt -B deps/build/qtmqtt -G Ninja \
+          -DCMAKE_C_COMPILER="$CC_NAME" -DCMAKE_CXX_COMPILER="$CXX_NAME" \
+          -DCMAKE_PREFIX_PATH="$qt" -DCMAKE_INSTALL_PREFIX="$install_dir" \
+          -DQT_BUILD_TESTS=OFF -DQT_BUILD_EXAMPLES=OFF
+        cmake --build deps/build/qtmqtt
+        cmake --install deps/build/qtmqtt
+
+    - name: Verify Qt MQTT install
+      shell: bash
+      run: |
+        set -euo pipefail
+        config="deps/install/lib/cmake/Qt6Mqtt/Qt6MqttConfig.cmake"
+        if [ ! -f "$config" ]; then
+          echo "::error::Qt MQTT config not found at $config"
+          exit 1
+        fi
+        echo "Qt MQTT ready: $config"
+
+    # windeployqt only looks for Qt modules inside Qt's own bin folder (see scripts/sb.ps1).
+    - name: Copy Qt MQTT DLL next to Qt (windows)
+      if: runner.os == 'Windows'
+      shell: bash
+      env:
+        QT_PATH: ${{ inputs.qt-path }}
+      run: |
+        set -euo pipefail
+        qt_bin="$(cygpath -u "$QT_PATH")/bin"
+        cp -f deps/install/bin/Qt6Mqtt*.dll "$qt_bin/"
+        ls -l "$qt_bin"/Qt6Mqtt*.dll
