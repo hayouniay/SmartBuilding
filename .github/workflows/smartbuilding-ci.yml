@@ -2,9 +2,10 @@ name: SmartBuilding CI
 
 on:
   push:
-    branches: [main]
+    branches: [ "master", "feature/*", "hotfix/*", "bug/*" ]
     tags: ['v*']
   pull_request:
+    branches: [ "master" ]
   workflow_dispatch:
 
 permissions:
