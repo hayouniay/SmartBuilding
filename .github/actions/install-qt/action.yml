@@ -1,6 +1,5 @@
-# Installs Qt 6.8 for one target (linux gcc_64, or windows MinGW) and outputs its path.
 name: Install Qt
-description: Install Qt for Linux (gcc_64) or Windows (MinGW) and output the Qt prefix.
+description: Install Qt for Linux (GCC) or Windows (MinGW) and output the Qt prefix.
 
 inputs:
   target:
@@ -13,7 +12,7 @@ inputs:
 
 outputs:
   qt-path:
-    description: "Qt prefix, e.g. .../6.8.0/gcc_64"
+    description: "Qt installation prefix"
     value: ${{ steps.qt-linux.outputs.qtPath || steps.qt-windows.outputs.qtPath }}
 
 runs:
@@ -64,58 +63,26 @@ runs:
 
         if ([string]::IsNullOrWhiteSpace($qtPath)) {
           $qtPath = $env:QT_ROOT_DIR
-          Write-Host "qtPath output is empty; using QT_ROOT_DIR: $qtPath"
         }
 
         if ([string]::IsNullOrWhiteSpace($qtPath)) {
-          throw "Qt path is empty. Check the output exposed by jurplel/install-qt-action@v4."
+          throw "Qt path is empty. Check install-qt-action outputs."
         }
 
-        if (-not (Test-Path $qtPath)) {
-          throw "Qt installation path does not exist: $qtPath"
+        $toolsRoot = $env:IQTA_TOOLS
+
+        if ([string]::IsNullOrWhiteSpace($toolsRoot)) {
+          $toolsRoot = Join-Path (Split-Path -Parent (Split-Path -Parent $qtPath)) 'Tools'
         }
 
-        # Find the MinGW compiler directory.
-        $candidates = @()
+        $mingw = Join-Path $toolsRoot 'mingw1310_64\bin'
 
-        if (-not [string]::IsNullOrWhiteSpace($env:IQTA_TOOLS)) {
-          $candidates += Join-Path $env:IQTA_TOOLS 'mingw1310_64\bin'
-        }
-
-        # QT_ROOT_DIR usually points to <Qt>\6.8.0\mingw_64.
-        $qtRoot = Split-Path -Parent (Split-Path -Parent $qtPath)
-        $candidates += Join-Path $qtRoot 'Tools\mingw1310_64\bin'
-
-        # Also support QT_ROOT_DIR pointing directly to the Qt version.
-        $candidates += Join-Path (Split-Path -Parent $qtPath) 'Tools\mingw1310_64\bin'
-
-        $mingw = $null
-
-        foreach ($candidate in ($candidates | Select-Object -Unique)) {
-          Write-Host "Checking MinGW directory: $candidate"
-
-          if (Test-Path (Join-Path $candidate 'g++.exe')) {
-            $mingw = $candidate
-            break
-          }
-        }
-
-        if (-not $mingw) {
-          Write-Host "Qt path: $qtPath"
-          Write-Host "QT_ROOT_DIR: $env:QT_ROOT_DIR"
-          Write-Host "IQTA_TOOLS: $env:IQTA_TOOLS"
-          throw "MinGW compiler g++.exe not found. Checked: $($candidates -join '; ')"
+        if (-not (Test-Path (Join-Path $mingw 'g++.exe'))) {
+          throw "MinGW compiler not found: $mingw"
         }
 
         # Add MinGW to PATH for subsequent GitHub Actions steps.
         $mingw | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
-        # Also update PATH in this step.
-        $env:PATH = "$mingw;$env:PATH"
-
+        Write-Host "Qt path: $qtPath"
         Write-Host "MinGW added to PATH: $mingw"
-        & (Join-Path $mingw 'g++.exe') --version
-
-        if ($LASTEXITCODE -ne 0) {
-          throw "MinGW compiler failed to execute."
-        }

@@ -1,7 +1,5 @@
-# Builds the Qt MQTT version pinned in deps/qtmqtt.env into deps/install.
-# The build is cached, so later jobs with the same pin and Qt version reuse it.
 name: Build Qt MQTT (pinned)
-description: Build the pinned Qt MQTT (deps/qtmqtt.env) into deps/install, with caching.
+description: Build the pinned Qt MQTT into deps/install, with caching.
 
 inputs:
   qt-path:
@@ -19,8 +17,14 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        if [[ ! -f deps/qtmqtt.env ]]; then
+          echo "::error::deps/qtmqtt.env not found."
+          exit 1
+        fi
         # shellcheck source=/dev/null
         . deps/qtmqtt.env
+        : "${QTMQTT_REPO:?QTMQTT_REPO is missing}"
+        : "${QTMQTT_TAG:?QTMQTT_TAG is missing}"
         echo "repo=$QTMQTT_REPO" >> "$GITHUB_OUTPUT"
         echo "tag=$QTMQTT_TAG" >> "$GITHUB_OUTPUT"
 
@@ -42,18 +46,54 @@ runs:
         CXX_NAME: ${{ runner.os == 'Linux' && 'g++-14' || 'g++' }}
       run: |
         set -euo pipefail
-        qt="$QT_PATH"
+
+        qt="${QT_PATH:-}"
+
+        if [[ -z "$qt" ]]; then
+          echo "::error::Qt path is empty. Pass the install action's qt-path output."
+          exit 1
+        fi
+
         install_dir="$PWD/deps/install"
-        # On Windows, give CMake native paths (C:/...) instead of Git Bash paths (/d/...).
+
+        # Convert Git Bash paths to native Windows paths for CMake.
         if command -v cygpath >/dev/null 2>&1; then
           qt="$(cygpath -m "$qt")"
           install_dir="$(cygpath -m "$install_dir")"
         fi
-        git clone --depth 1 --branch "$QTMQTT_TAG_NAME" "$QTMQTT_REPO_URL" deps/qtmqtt
-        cmake -S deps/qtmqtt -B deps/build/qtmqtt -G Ninja \
-          -DCMAKE_C_COMPILER="$CC_NAME" -DCMAKE_CXX_COMPILER="$CXX_NAME" \
-          -DCMAKE_PREFIX_PATH="$qt" -DCMAKE_INSTALL_PREFIX="$install_dir" \
-          -DQT_BUILD_TESTS=OFF -DQT_BUILD_EXAMPLES=OFF
+
+        for tool in git cmake ninja; do
+          if ! command -v "$tool" >/dev/null 2>&1; then
+            echo "::error::Required tool not found: $tool"
+            exit 1
+          fi
+        done
+
+        if [[ ! -d "$qt" ]]; then
+          echo "::error::Qt installation directory not found: $qt"
+          exit 1
+        fi
+
+        mkdir -p deps/build
+        rm -rf deps/qtmqtt deps/build/qtmqtt
+
+        git clone \
+          --depth 1 \
+          --branch "$QTMQTT_TAG_NAME" \
+          "$QTMQTT_REPO_URL" \
+          deps/qtmqtt
+
+        cmake \
+          -S deps/qtmqtt \
+          -B deps/build/qtmqtt \
+          -G Ninja \
+          -DCMAKE_C_COMPILER="$CC_NAME" \
+          -DCMAKE_CXX_COMPILER="$CXX_NAME" \
+          -DCMAKE_PREFIX_PATH="$qt" \
+          -DCMAKE_INSTALL_PREFIX="$install_dir" \
+          -DQT_BUILD_TESTS=OFF \
+          -DQT_BUILD_EXAMPLES=OFF
+
         cmake --build deps/build/qtmqtt
         cmake --install deps/build/qtmqtt
 
@@ -62,20 +102,44 @@ runs:
       run: |
         set -euo pipefail
         config="deps/install/lib/cmake/Qt6Mqtt/Qt6MqttConfig.cmake"
-        if [ ! -f "$config" ]; then
-          echo "::error::Qt MQTT config not found at $config"
+
+        if [[ ! -f "$config" ]]; then
+          echo "::error::Qt MQTT config not found: $config"
           exit 1
         fi
         echo "Qt MQTT ready: $config"
 
-    # windeployqt only looks for Qt modules inside Qt's own bin folder (see scripts/sb.ps1).
-    - name: Copy Qt MQTT DLL next to Qt (windows)
+    - name: Copy Qt MQTT DLL next to Qt (Windows)
       if: runner.os == 'Windows'
       shell: bash
       env:
         QT_PATH: ${{ inputs.qt-path }}
       run: |
         set -euo pipefail
-        qt_bin="$(cygpath -u "$QT_PATH")/bin"
-        cp -f deps/install/bin/Qt6Mqtt*.dll "$qt_bin/"
+
+        qt="${QT_PATH:-}"
+
+        if [[ -z "$qt" ]]; then
+          echo "::error::Qt path is empty; cannot copy Qt MQTT DLL."
+          exit 1
+        fi
+
+        qt_bin="$(cygpath -u "$qt")/bin"
+
+        if [[ ! -d "$qt_bin" ]]; then
+          echo "::error::Qt bin directory not found: $qt_bin"
+          exit 1
+        fi
+
+        shopt -s nullglob
+        dlls=(deps/install/bin/Qt6Mqtt*.dll)
+
+        if (( ${#dlls[@]} == 0 )); then
+          echo "::error::No Qt6Mqtt DLL found in deps/install/bin."
+          exit 1
+        fi
+
+        cp -f "${dlls[@]}" "$qt_bin/"
+
+        echo "Qt MQTT DLLs copied to $qt_bin"
         ls -l "$qt_bin"/Qt6Mqtt*.dll
