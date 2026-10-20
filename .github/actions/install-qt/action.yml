@@ -1,11 +1,12 @@
 # Installs Qt 6.8 for one target (linux gcc_64, or windows MinGW) and outputs its path.
 name: Install Qt
-description: Install Qt for linux (gcc_64) or windows (MinGW) and output the Qt prefix.
+description: Install Qt for Linux (gcc_64) or Windows (MinGW) and output the Qt prefix.
 
 inputs:
   target:
     description: "Target platform: linux or windows"
     required: true
+
   qt-version:
     description: "Qt version to install, e.g. 6.8.0"
     required: true
@@ -18,7 +19,10 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install Qt (linux)
+    # --------------------------------------------------
+    # Linux: install Qt with GCC
+    # --------------------------------------------------
+    - name: Install Qt (Linux)
       id: qt-linux
       if: inputs.target == 'linux'
       uses: jurplel/install-qt-action@v4
@@ -28,7 +32,10 @@ runs:
         cache: true
         cache-key-prefix: qt-linux
 
-    - name: Install Qt (windows, MinGW)
+    # --------------------------------------------------
+    # Windows: install Qt with MinGW
+    # --------------------------------------------------
+    - name: Install Qt (Windows, MinGW)
       id: qt-windows
       if: inputs.target == 'windows'
       uses: jurplel/install-qt-action@v4
@@ -39,17 +46,76 @@ runs:
         cache: true
         cache-key-prefix: qt-windows
 
-    # The MinGW compiler is installed next to Qt (<Qt root>\Tools\mingw1310_64\bin).
-    - name: Put MinGW on PATH (windows)
+    # --------------------------------------------------
+    # Windows: locate MinGW and add it to PATH
+    # --------------------------------------------------
+    - name: Put MinGW on PATH (Windows)
       if: inputs.target == 'windows'
       shell: pwsh
       env:
         QT_PATH: ${{ steps.qt-windows.outputs.qtPath }}
+        QT_ROOT_DIR: ${{ env.QT_ROOT_DIR }}
+        IQTA_TOOLS: ${{ env.IQTA_TOOLS }}
       run: |
-        $root = Split-Path -Parent (Split-Path -Parent $env:QT_PATH)
-        $mingw = Join-Path $root 'Tools\mingw1310_64\bin'
-        if (-not (Test-Path (Join-Path $mingw 'g++.exe'))) {
-          throw "MinGW compiler not found at $mingw"
+        $ErrorActionPreference = 'Stop'
+
+        # Resolve the Qt installation prefix.
+        $qtPath = $env:QT_PATH
+
+        if ([string]::IsNullOrWhiteSpace($qtPath)) {
+          $qtPath = $env:QT_ROOT_DIR
+          Write-Host "qtPath output is empty; using QT_ROOT_DIR: $qtPath"
         }
+
+        if ([string]::IsNullOrWhiteSpace($qtPath)) {
+          throw "Qt path is empty. Check the output exposed by jurplel/install-qt-action@v4."
+        }
+
+        if (-not (Test-Path $qtPath)) {
+          throw "Qt installation path does not exist: $qtPath"
+        }
+
+        # Find the MinGW compiler directory.
+        $candidates = @()
+
+        if (-not [string]::IsNullOrWhiteSpace($env:IQTA_TOOLS)) {
+          $candidates += Join-Path $env:IQTA_TOOLS 'mingw1310_64\bin'
+        }
+
+        # QT_ROOT_DIR usually points to <Qt>\6.8.0\mingw_64.
+        $qtRoot = Split-Path -Parent (Split-Path -Parent $qtPath)
+        $candidates += Join-Path $qtRoot 'Tools\mingw1310_64\bin'
+
+        # Also support QT_ROOT_DIR pointing directly to the Qt version.
+        $candidates += Join-Path (Split-Path -Parent $qtPath) 'Tools\mingw1310_64\bin'
+
+        $mingw = $null
+
+        foreach ($candidate in ($candidates | Select-Object -Unique)) {
+          Write-Host "Checking MinGW directory: $candidate"
+
+          if (Test-Path (Join-Path $candidate 'g++.exe')) {
+            $mingw = $candidate
+            break
+          }
+        }
+
+        if (-not $mingw) {
+          Write-Host "Qt path: $qtPath"
+          Write-Host "QT_ROOT_DIR: $env:QT_ROOT_DIR"
+          Write-Host "IQTA_TOOLS: $env:IQTA_TOOLS"
+          throw "MinGW compiler g++.exe not found. Checked: $($candidates -join '; ')"
+        }
+
+        # Add MinGW to PATH for subsequent GitHub Actions steps.
         $mingw | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+        # Also update PATH in this step.
+        $env:PATH = "$mingw;$env:PATH"
+
         Write-Host "MinGW added to PATH: $mingw"
+        & (Join-Path $mingw 'g++.exe') --version
+
+        if ($LASTEXITCODE -ne 0) {
+          throw "MinGW compiler failed to execute."
+        }
