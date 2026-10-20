@@ -1,0 +1,48 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+    "configurePresets": [
+        {
+            "name": "win-msvc",
+            "displayName": "Windows x64 (MSVC, Qt apps + tests)",
+            "generator": "Visual Studio 17 2022",
+            "architecture": { "value": "x64", "strategy": "set" },
+            "binaryDir": "${sourceDir}/build/win",
+            "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+            "cacheVariables": {
+                "CMAKE_PREFIX_PATH": "$env{QT_DIR}",
+                "SB_BUILD_APPS": "ON",
+                "SB_BUILD_TESTS": "ON"
+            }
+        },
+        {
+            "name": "win-tests-only",
+            "displayName": "Windows x64 (unit tests only, no Qt)",
+            "inherits": "win-msvc",
+            "binaryDir": "${sourceDir}/build/win-tests",
+            "cacheVariables": {
+                "SB_BUILD_APPS": "OFF",
+                "CMAKE_PREFIX_PATH": ""
+            }
+        }
+    ],
+    "buildPresets": [
+        { "name": "win-debug", "configurePreset": "win-msvc", "configuration": "Debug" },
+        { "name": "win-release", "configurePreset": "win-msvc", "configuration": "Release" },
+        { "name": "win-tests-build", "configurePreset": "win-tests-only", "configuration": "Debug" }
+    ],
+    "testPresets": [
+        {
+            "name": "win-test",
+            "configurePreset": "win-msvc",
+            "configuration": "Debug",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "win-tests-only-test",
+            "configurePreset": "win-tests-only",
+            "configuration": "Debug",
+            "output": { "outputOnFailure": true }
+        }
+    ]
+}

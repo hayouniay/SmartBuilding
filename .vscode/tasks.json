@@ -1,0 +1,198 @@
+{
+    "version": "2.0.0",
+
+    "inputs": [
+        {
+            "id": "app",
+            "type": "pickString",
+            "description": "Application to run",
+            "options": ["client", "server", "simulator", "all"],
+            "default": "client"
+        }
+    ],
+
+    "tasks": [
+        {
+            "label": "SB: Check Environment",
+            "type": "shell",
+            "command": "bash scripts/sb.sh check",
+            "windows": {
+                "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\sb.ps1 check"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "icon": { "id": "pass-filled", "color": "terminal.ansiBlue" }
+        },
+
+        {
+            "label": "SB: Install Dependencies",
+            "type": "shell",
+            "command": "bash scripts/sb.sh install",
+            "windows": {
+                "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\sb.ps1 install"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "icon": { "id": "package", "color": "terminal.ansiYellow" }
+        },
+
+        {
+            "label": "SB: Build",
+            "type": "shell",
+            "command": "bash scripts/sb.sh build",
+            "windows": {
+                "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\sb.ps1 build"
+            },
+            "dependsOn": ["SB: Check Environment"],
+            "dependsOrder": "sequence",
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": ["$gcc"],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "icon": { "id": "tools", "color": "terminal.ansiGreen" }
+        },
+
+        {
+            "label": "SB: Build Tests Only",
+            "type": "shell",
+            "command": "bash scripts/sb.sh build-tests",
+            "windows": {
+                "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\sb.ps1 build-tests"
+            },
+            "group": "build",
+            "problemMatcher": ["$gcc"],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "icon": { "id": "beaker", "color": "terminal.ansiYellow" }
+        },
+
+        {
+            "label": "SB: Run Tests",
+            "type": "shell",
+            "command": "bash scripts/sb.sh test",
+            "windows": {
+                "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\sb.ps1 test"
+            },
+            "dependsOn": ["SB: Build"],
+            "dependsOrder": "sequence",
+            "group": { "kind": "test", "isDefault": true },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "icon": { "id": "beaker", "color": "terminal.ansiGreen" }
+        },
+
+        {
+            "label": "SB: Build, Test and Launch",
+            "type": "shell",
+            "command": "bash scripts/sb.sh build-test-launch ${input:app}",
+            "windows": {
+                "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\sb.ps1 build-test-launch ${input:app}"
+            },
+            "dependsOn": ["SB: Check Environment"],
+            "dependsOrder": "sequence",
+            "problemMatcher": ["$gcc"],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": true
+            },
+            "icon": { "id": "rocket", "color": "terminal.ansiGreen" }
+        },
+
+        {
+            "label": "SB: Launch App",
+            "type": "shell",
+            "command": "bash scripts/sb.sh launch ${input:app}",
+            "windows": {
+                "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\sb.ps1 launch ${input:app}"
+            },
+            "dependsOn": ["SB: Build"],
+            "dependsOrder": "sequence",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": true
+            },
+            "icon": { "id": "play", "color": "terminal.ansiCyan" }
+        },
+
+        {
+            "label": "SB: Clean",
+            "type": "shell",
+            "command": "bash scripts/sb.sh clean",
+            "windows": {
+                "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\sb.ps1 clean"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "icon": { "id": "trash", "color": "terminal.ansiRed" }
+        },
+
+        {
+            "label": "SB: Start Broker",
+            "type": "shell",
+            "command": "bash scripts/sb.sh broker-start",
+            "windows": {
+                "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\sb.ps1 broker-start"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "icon": { "id": "broadcast", "color": "terminal.ansiGreen" }
+        },
+
+        {
+            "label": "SB: Stop Broker",
+            "type": "shell",
+            "command": "bash scripts/sb.sh broker-stop",
+            "windows": {
+                "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\sb.ps1 broker-stop"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "icon": { "id": "circle-slash", "color": "terminal.ansiRed" }
+        },
+
+        {
+            "label": "SB: Broker Status",
+            "type": "shell",
+            "command": "bash scripts/sb.sh broker-status",
+            "windows": {
+                "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\sb.ps1 broker-status"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "icon": { "id": "pulse", "color": "terminal.ansiBlue" }
+        }
+    ]
+}

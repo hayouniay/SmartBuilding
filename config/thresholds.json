@@ -1,0 +1,70 @@
+{
+    "automation": [
+        {
+            "direction": "above",
+            "hysteresis": 100,
+            "limit": 900,
+            "name": "co2-ventilation",
+            "sensorType": "co2",
+            "targetType": "fan"
+        }
+    ],
+    "thresholds": [
+        {
+            "criticalMargin": 4,
+            "direction": "above",
+            "hysteresis": 0.5,
+            "limit": 27,
+            "name": "temperature-high",
+            "sensorType": "temperature"
+        },
+        {
+            "criticalMargin": 4,
+            "direction": "below",
+            "hysteresis": 0.5,
+            "limit": 18,
+            "name": "temperature-low",
+            "sensorType": "temperature"
+        },
+        {
+            "criticalMargin": 10,
+            "direction": "above",
+            "hysteresis": 2,
+            "limit": 60,
+            "name": "humidity-high",
+            "sensorType": "humidity"
+        },
+        {
+            "criticalMargin": 10,
+            "direction": "below",
+            "hysteresis": 2,
+            "limit": 30,
+            "name": "humidity-low",
+            "sensorType": "humidity"
+        },
+        {
+            "criticalMargin": 500,
+            "direction": "above",
+            "hysteresis": 50,
+            "limit": 1000,
+            "name": "co2-high",
+            "sensorType": "co2"
+        },
+        {
+            "criticalMargin": 10,
+            "direction": "below",
+            "hysteresis": 3,
+            "limit": 20,
+            "name": "battery-low",
+            "sensorType": "battery"
+        },
+        {
+            "criticalMargin": 10,
+            "direction": "below",
+            "hysteresis": 3,
+            "limit": -85,
+            "name": "signal-weak",
+            "sensorType": "rssi"
+        }
+    ]
+}

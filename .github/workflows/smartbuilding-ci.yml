@@ -1,0 +1,364 @@
+name: SmartBuilding CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel an older run of the same branch or PR when a new commit arrives.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: '6.8.0'
+
+jobs:
+  # ============================ Stage 1: check ============================
+  check-linux:
+    name: 1 check (linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tools and versions
+        shell: bash
+        run: |
+          status=0
+          check() {
+            if command -v "$1" >/dev/null 2>&1; then echo "[ OK ] $1"
+            else echo "[MISS] $1"; status=1; fi
+          }
+          check g++-14
+          check cmake
+          check git
+          check python3
+          if command -v ninja >/dev/null 2>&1; then echo "[ OK ] ninja"
+          else echo "[WARN] ninja (installed in stage 2)"; fi
+          echo "g++-14: $(g++-14 -dumpfullversion 2>/dev/null || echo n/a)"
+          echo "cmake:  $(cmake --version 2>/dev/null | awk 'NR==1{print $3}' || echo n/a)"
+          if grep -q '^QTMQTT_TAG=' deps/qtmqtt.env 2>/dev/null; then
+            tag="$(grep '^QTMQTT_TAG=' deps/qtmqtt.env | cut -d= -f2)"
+            if [ "$tag" = "v$QT_VERSION" ]; then
+              echo "[ OK ] deps/qtmqtt.env pins $tag (matches Qt $QT_VERSION)"
+            else
+              echo "[MISS] deps/qtmqtt.env pins $tag but Qt is $QT_VERSION"; status=1
+            fi
+          else
+            echo "[MISS] deps/qtmqtt.env"; status=1
+          fi
+          exit $status
+
+  check-windows:
+    name: 1 check (windows)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tools and versions
+        shell: pwsh
+        run: |
+          $status = 0
+          foreach ($tool in 'cmake', 'git', 'python') {
+            if (Get-Command $tool -ErrorAction SilentlyContinue) { Write-Host "[ OK ] $tool" }
+            else { Write-Host "[MISS] $tool"; $status = 1 }
+          }
+          if (Get-Command ninja -ErrorAction SilentlyContinue) { Write-Host '[ OK ] ninja' }
+          else { Write-Host '[WARN] ninja (installed in stage 2)' }
+          if (Test-Path deps/qtmqtt.env) {
+            $tag = (Select-String -Path deps/qtmqtt.env -Pattern '^QTMQTT_TAG=').Line -replace '^QTMQTT_TAG=', ''
+            if ($tag -eq "v$env:QT_VERSION") { Write-Host "[ OK ] deps/qtmqtt.env pins $tag (matches Qt $env:QT_VERSION)" }
+            else { Write-Host "[MISS] deps/qtmqtt.env pins $tag but Qt is $env:QT_VERSION"; $status = 1 }
+          }
+          else { Write-Host '[MISS] deps/qtmqtt.env'; $status = 1 }
+          if (Get-Command cmake -ErrorAction SilentlyContinue) { cmake --version | Select-Object -First 1 }
+          exit $status
+
+  # ========================= Stage 2: install deps =========================
+  install-deps-linux:
+    name: 2 install deps (linux)
+    needs: check-linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      - name: Install Qt
+        id: qt
+        uses: ./.github/actions/install-qt
+        with:
+          target: linux
+          qt-version: ${{ env.QT_VERSION }}
+
+      - name: Build Qt MQTT
+        uses: ./.github/actions/build-qt-mqtt
+        with:
+          qt-path: ${{ steps.qt.outputs.qt-path }}
+          qt-version: ${{ env.QT_VERSION }}
+
+  install-deps-windows:
+    name: 2 install deps (windows)
+    needs: check-windows
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ninja
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            choco install ninja -y --no-progress
+          }
+
+      - name: Install Qt (MinGW)
+        id: qt
+        uses: ./.github/actions/install-qt
+        with:
+          target: windows
+          qt-version: ${{ env.QT_VERSION }}
+
+      - name: Build Qt MQTT
+        uses: ./.github/actions/build-qt-mqtt
+        with:
+          qt-path: ${{ steps.qt.outputs.qt-path }}
+          qt-version: ${{ env.QT_VERSION }}
+
+  # ======================= Stage 3: build and test =======================
+  build-test-linux:
+    name: 3 build and test (linux)
+    needs: install-deps-linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      - name: Install Qt
+        id: qt
+        uses: ./.github/actions/install-qt
+        with:
+          target: linux
+          qt-version: ${{ env.QT_VERSION }}
+
+      - name: Restore Qt MQTT
+        uses: ./.github/actions/build-qt-mqtt
+        with:
+          qt-path: ${{ steps.qt.outputs.qt-path }}
+          qt-version: ${{ env.QT_VERSION }}
+
+      - name: Configure
+        env:
+          QT_PATH: ${{ steps.qt.outputs.qt-path }}
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 \
+            -DCMAKE_PREFIX_PATH="$QT_PATH;$GITHUB_WORKSPACE/deps/install"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          if-no-files-found: error
+          path: |
+            build/sb_server
+            build/sb_client
+            build/sb_simulator
+
+  build-test-windows:
+    name: 3 build and test (windows)
+    needs: install-deps-windows
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ninja
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            choco install ninja -y --no-progress
+          }
+
+      - name: Install Qt (MinGW)
+        id: qt
+        uses: ./.github/actions/install-qt
+        with:
+          target: windows
+          qt-version: ${{ env.QT_VERSION }}
+
+      - name: Restore Qt MQTT
+        uses: ./.github/actions/build-qt-mqtt
+        with:
+          qt-path: ${{ steps.qt.outputs.qt-path }}
+          qt-version: ${{ env.QT_VERSION }}
+
+      - name: Configure
+        shell: pwsh
+        env:
+          QT_PATH: ${{ steps.qt.outputs.qt-path }}
+        run: |
+          $deps = Join-Path $env:GITHUB_WORKSPACE 'deps\install'
+          if (-not (Test-Path (Join-Path $deps 'lib\cmake\Qt6Mqtt\Qt6MqttConfig.cmake'))) {
+            throw 'Qt MQTT is missing from deps\install. Check the Build Qt MQTT step.'
+          }
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ `
+            "-DCMAKE_PREFIX_PATH=$env:QT_PATH;$deps"
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build build --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+
+      - name: Unit tests
+        shell: pwsh
+        run: |
+          ctest --test-dir build --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed' }
+
+      - name: Stage runtime files (windeployqt output)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force stage | Out-Null
+          Copy-Item build\sb_*.exe, build\*.dll, build\platforms, build\sqldrivers, build\styles,
+                    build\tls, build\imageformats, build\iconengines, build\networkinformation, build\generic `
+                    -Destination stage -Recurse -ErrorAction SilentlyContinue
+          Get-ChildItem stage | Select-Object -ExpandProperty Name
+
+      - name: Upload runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-runtime
+          if-no-files-found: error
+          path: stage/
+
+  # ===================== Stage 4: package the artifacts =====================
+  package-linux:
+    name: 4 package (linux)
+    needs: build-test-linux
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-binaries
+          path: pkg/SmartBuilding-linux-x64
+
+      - name: Create tarball
+        run: |
+          mkdir -p dist
+          tar -czf dist/SmartBuilding-linux-x64.tar.gz -C pkg SmartBuilding-linux-x64
+          tar -tzf dist/SmartBuilding-linux-x64.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartBuilding-linux-x64
+          path: dist/SmartBuilding-linux-x64.tar.gz
+          if-no-files-found: error
+
+  package-windows:
+    name: 4 package (windows)
+    needs: build-test-windows
+    if: github.event_name != 'pull_request'
+    runs-on: windows-2022
+    steps:
+      - name: Download runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-runtime
+          path: pkg
+
+      - name: Create zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path pkg\* -DestinationPath dist\SmartBuilding-windows-x64.zip -Force
+          (Get-Item dist\SmartBuilding-windows-x64.zip).Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartBuilding-windows-x64
+          path: dist/SmartBuilding-windows-x64.zip
+          if-no-files-found: error
+
+  # ===================== Stage 5: tag and release =====================
+  # One job for both platforms: a tag is per commit, not per platform.
+  tag-and-release:
+    name: 5 tag and release
+    needs: [package-linux, package-windows]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create version tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            # Tag pushed by a person: release it, do not create another tag.
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version="$(sed -n 's/^project(SmartBuilding VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt | head -n1)"
+          tag="v$version"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "Tag $tag already exists; no new release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" -m "SmartBuilding $tag"
+            git push origin "$tag"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download artifacts
+        if: steps.tag.outputs.release == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: SmartBuilding-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        if: steps.tag.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          ls -la dist
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "SmartBuilding $TAG" --generate-notes
+          fi
+          gh release upload "$TAG" dist/* --clobber

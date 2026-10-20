@@ -1,0 +1,55 @@
+# Installs Qt 6.8 for one target (linux gcc_64, or windows MinGW) and outputs its path.
+name: Install Qt
+description: Install Qt for linux (gcc_64) or windows (MinGW) and output the Qt prefix.
+
+inputs:
+  target:
+    description: "Target platform: linux or windows"
+    required: true
+  qt-version:
+    description: "Qt version to install, e.g. 6.8.0"
+    required: true
+
+outputs:
+  qt-path:
+    description: "Qt prefix, e.g. .../6.8.0/gcc_64"
+    value: ${{ steps.qt-linux.outputs.qtPath || steps.qt-windows.outputs.qtPath }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Qt (linux)
+      id: qt-linux
+      if: inputs.target == 'linux'
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: ${{ inputs.qt-version }}
+        arch: linux_gcc_64
+        cache: true
+        cache-key-prefix: qt-linux
+
+    - name: Install Qt (windows, MinGW)
+      id: qt-windows
+      if: inputs.target == 'windows'
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: ${{ inputs.qt-version }}
+        arch: win64_mingw
+        tools: tools_mingw1310
+        cache: true
+        cache-key-prefix: qt-windows
+
+    # The MinGW compiler is installed next to Qt (<Qt root>\Tools\mingw1310_64\bin).
+    - name: Put MinGW on PATH (windows)
+      if: inputs.target == 'windows'
+      shell: pwsh
+      env:
+        QT_PATH: ${{ steps.qt-windows.outputs.qtPath }}
+      run: |
+        $root = Split-Path -Parent (Split-Path -Parent $env:QT_PATH)
+        $mingw = Join-Path $root 'Tools\mingw1310_64\bin'
+        if (-not (Test-Path (Join-Path $mingw 'g++.exe'))) {
+          throw "MinGW compiler not found at $mingw"
+        }
+        $mingw | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+        Write-Host "MinGW added to PATH: $mingw"

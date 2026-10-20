@@ -1,0 +1,13 @@
+# Build output
+build/
+build-*/
+build-tests-mingw/
+
+# Generated dependency files (the pin in deps/qtmqtt.env is committed)
+deps/qtmqtt/
+deps/build/
+deps/install/
+
+# Runtime data
+smartbuilding.db
+backups/

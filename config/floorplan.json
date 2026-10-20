@@ -1,0 +1,8 @@
+{
+    "rooms": [
+        { "zone": "F1-Lobby",         "label": "Lobby",          "x": 0.02, "y": 0.10, "w": 0.30, "h": 0.80 },
+        { "zone": "F2-OpenOffice",    "label": "Open office",    "x": 0.35, "y": 0.10, "w": 0.38, "h": 0.38 },
+        { "zone": "F2-ServerRoom",    "label": "Server room",    "x": 0.75, "y": 0.10, "w": 0.23, "h": 0.38 },
+        { "zone": "F3-MeetingRoom",   "label": "Meeting room",   "x": 0.35, "y": 0.52, "w": 0.63, "h": 0.38 }
+    ]
+}
